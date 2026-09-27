@@ -1,0 +1,32 @@
+# Build and push Kubuntu 26.04 Docker image to docker.io/partha09
+# Trigger manually or when Dockerfile changes
+
+name: Docker - Kubuntu 26.04
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/assets/docker/kubuntu-2604/Dockerfile'
+    branches:
+      - Kubuntu_darkly
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-26.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6.0.2
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: partha09
+          password: ${{ secrets.DOCKER_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .github/assets/docker/kubuntu-2604
+          push: true
+          tags: partha09/kubuntu:26.04
