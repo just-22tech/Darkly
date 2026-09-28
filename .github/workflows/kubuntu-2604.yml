@@ -1,7 +1,6 @@
 # Kubuntu 26.04
 # Uses Docker image: partha09/kubuntu:26.04
-# Build Darkly and publish .deb package
-# Trigger: manually (workflow_dispatch) OR via workflow_call from darkly-ci.yml
+# Build Darkly from upstream release tag and publish .deb package
 
 name: Darkly - Kubuntu 26.04
 
@@ -9,17 +8,10 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Darkly version to build (e.g. 0.5.39)'
-        required: true
+        description: 'Darkly version (e.g. 0.5.39). Leave empty for latest tag.'
+        required: false
         type: string
-  workflow_call:
-    inputs:
-      cache-file-path:
-        required: true
-        type: string
-      version:
-        required: true
-        type: string
+        default: ''
 
 env:
   KUBUNTU_RELEASE: "26.04"
@@ -33,47 +25,49 @@ jobs:
       run:
         shell: bash
     steps:
-      - name: Download source tarball (manual trigger)
-        if: ${{ github.event_name == 'workflow_dispatch' }}
+      - name: Update container packages
         run: |
-          curl -L $BUILD_REPO/archive/refs/tags/v${{ inputs.version }}.tar.gz \
-               --output darkly-v${{ inputs.version }}.tar.gz
-          echo "TARBALL=darkly-v${{ inputs.version }}.tar.gz" >> "$GITHUB_ENV"
+          apt-get update -y
+          apt-get full-upgrade -y
 
-      - name: Restore cached tarball (ci trigger)
-        if: ${{ github.event_name != 'workflow_dispatch' }}
-        uses: actions/cache/restore@v5.0.5
-        with:
-          key: ${{ runner.os }}-v${{ inputs.version }}-${{ hashFiles(inputs.cache-file-path) }}
-          path: ${{ inputs.cache-file-path }}
-          fail-on-cache-miss: true
+      - name: Resolve version
+        run: |
+          if [ -n "${{ inputs.version }}" ]; then
+            echo "VERSION=${{ inputs.version }}" >> "$GITHUB_ENV"
+          else
+            latest_tag=$(git -c 'versionsort.suffix=-' ls-remote --exit-code --refs --sort='version:refname' --tags $BUILD_REPO '*.*' \
+                         | tail --lines=1 | cut --delimiter='/' --fields=3)
+            version=$(echo "$latest_tag" | sed 's/^v//')
+            echo "Detected latest tag: $latest_tag (version: $version)"
+            echo "VERSION=$version" >> "$GITHUB_ENV"
+          fi
 
-      - name: Set tarball path (ci trigger)
-        if: ${{ github.event_name != 'workflow_dispatch' }}
-        run: echo "TARBALL=${{ inputs.cache-file-path }}" >> "$GITHUB_ENV"
+      - name: Download release tarball
+        run: |
+          curl -L $BUILD_REPO/archive/refs/tags/v${{ env.VERSION }}.tar.gz \
+               --output darkly-v${{ env.VERSION }}.tar.gz
 
       - name: Extract source
-        run: tar xvf ${{ env.TARBALL }}
+        run: tar xvf darkly-v${{ env.VERSION }}.tar.gz
 
       - name: Build Darkly
         run: |
           cmake_opts=(
-            -B Darkly-${{ inputs.version }}/build
-            -S Darkly-${{ inputs.version }}
+            -B Darkly-${{ env.VERSION }}/build
+            -S Darkly-${{ env.VERSION }}
             -DBUILD_DEBS=ON
           )
           cmake "${cmake_opts[@]}" \
-            && cmake --build Darkly-${{ inputs.version }}/build -j$(nproc) \
+            && cmake --build Darkly-${{ env.VERSION }}/build -j$(nproc) \
             && echo "Build completed!" \
             || { echo "Build failed!"; exit 1; }
 
       - name: Build DEB
-        id: create_deb_package
         run: |
-          cd Darkly-${{ inputs.version }}/build
+          cd Darkly-${{ env.VERSION }}/build
           cpack -G DEB -V -DCPACK_THREADS=$(nproc)
-          artifact=$GITHUB_WORKSPACE/Darkly-${{ inputs.version }}/packages/darkly-${{ inputs.version }}_amd64.deb
-          publish_filename="darkly-${{ inputs.version }}_kubuntu-${{ env.KUBUNTU_RELEASE }}_amd64.deb"
+          artifact=$GITHUB_WORKSPACE/Darkly-${{ env.VERSION }}/packages/darkly-${{ env.VERSION }}_amd64.deb
+          publish_filename="darkly-${{ env.VERSION }}_kubuntu-${{ env.KUBUNTU_RELEASE }}_amd64.deb"
           mv $artifact $GITHUB_WORKSPACE/$publish_filename
           echo "ARTIFACT=$publish_filename" >> "$GITHUB_ENV"
           SHA256SUM=$(sha256sum $GITHUB_WORKSPACE/$publish_filename | awk '{ print $1 }')

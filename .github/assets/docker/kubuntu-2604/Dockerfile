@@ -5,8 +5,8 @@ ENV DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update && \
     apt-get dist-upgrade -y && \
-    apt-get install -y --no-install-recommends \
-        # Build tools
+    apt-get install -y \
+        ca-certificates \
         cmake \
         build-essential \
         extra-cmake-modules \
